@@ -602,10 +602,23 @@ C<content_type_try>, call L</content_type>; C<status_try> calls L</status>.
 An override of L</as> must not call back into the shorthands (C<text> and
 the others): they call C<as>, so the two would recurse.
 
+=item * Errors raised through the builder name the line that called it, or
+that called a subclass's method: the builder is internal to L<Carp>, and Carp
+trusts a subclass through its C<@ISA>.
+
 =back
 
 =head1 SEE ALSO
 
-L<PAGI::Response>, L<PAGI::Response/response>
+L<PAGI::Tools>, L<PAGI::Response>, L<PAGI::Response/response>
+
+=head1 AUTHOR
+
+John Napiorkowski <jjnapiork@cpan.org>
+
+=head1 LICENSE
+
+This library is free software; you may redistribute it and/or modify it under
+the same terms as the Artistic License 2.0.
 
 =cut

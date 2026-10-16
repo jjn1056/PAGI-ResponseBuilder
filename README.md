@@ -1,0 +1,298 @@
+# NAME
+
+PAGI::ResponseBuilder - Collect a response in stages, for frameworks
+
+# SYNOPSIS
+
+    package My::Framework::Response;
+    use parent 'PAGI::ResponseBuilder';
+
+    # in the framework, while handling a request
+    my $res = My::Framework::Response->new;
+    $res->header('X-Request-Id' => $id);          # a before-hook
+    $res->cookie(session => $sid, httponly => 1); # session code
+    $res->status(201)->json($item);               # the handler
+    $res->header('X-Elapsed' => $ms);             # an after-hook
+
+    await $res->to_app->($scope, $receive, $send);
+
+# DESCRIPTION
+
+A framework that handles a request in stages collects the response the same
+way: before-hooks, authentication and session code add headers and cookies,
+the handler chooses the body, and after-hooks may add more.
+PAGI::ResponseBuilder is that collector, for frameworks to extend. Every
+response it holds is an ordinary [PAGI::Response](https://metacpan.org/pod/PAGI%3A%3AResponse) value made by
+["response" in PAGI::Response](https://metacpan.org/pod/PAGI%3A%3AResponse#response).
+
+Applications do not need it: they return a complete value from
+`response('Name', ...)`.
+
+The builder holds no scope and never sends. ["to\_app"](#to_app) returns the current
+value's application, and sending it is the framework's job.
+
+# STATE AND TRANSITIONS
+
+The builder keeps a collected status, an ordered list of collected headers
+(cookies included), a collected Content-Type, and the current value, once a
+body method has succeeded. It never keeps a body's input.
+
+- **Body methods** build a new value from the collected state and their
+own arguments, and replace the current value only when that succeeds. A
+failure leaves the builder exactly as it was. The old value is never asked to
+change, so a redirect can replace a redirect, and a Problem a redirect.
+- **Setters** (`status`, `header`, `remove_header`, `content_type`,
+`cookie`) apply to the current value first, then to the collected state.
+A change the value refuses (a status that forbids its body, a redirect's own
+status or Location) croaks and changes nothing.
+- **A status a body brings with it** (a redirect's, or a `status`
+passed to ["as"](#as)) belongs to that value, not to the collected state:
+`redirect('/x')` then `text('hi')` is a 200.
+- **Cookies are headers.** `cookie` adds a `Set-Cookie` field, so
+order, reading and removal follow the header list.
+- **Clearing the Content-Type** means the body class's default, whether
+it is cleared before or after the body.
+- **Reads** come from the current value when there is one, else from
+the collected state.
+
+Changing the value ["response"](#response) returns directly is not supported: such
+changes are not part of the collected state, and a later body method replaces
+the value.
+
+# ERROR TIMING
+
+- **Construction errors** (a status the class forbids or owns,
+unencodable JSON, a non-string Text body, a bad redirect target, an unknown
+class) are raised by the method that caused them.
+- **Delivery errors before the response starts** are raised while the
+application from ["to\_app"](#to_app) runs, before it sends `http.response.start`: a
+File's existence, readability and range planning. Nothing has been sent, so a
+framework may catch them and send another response.
+- **Failures after the response has started** cannot be answered with
+another response; rethrow them. A Stream sends its start before it calls its
+producer, so a producer's failure is always one of these.
+`pagi.connection`'s `response_started` tells the two cases apart.
+
+# CONSTRUCTOR
+
+## new
+
+    my $builder = PAGI::ResponseBuilder->new;
+
+Takes no arguments. A subclass built with Moo passes none from
+`FOREIGNBUILDARGS`. Builder state lives under the `_response_builder` key of
+the blessed hash.
+
+# COLLECTING
+
+Each setter returns the builder.
+
+## status
+
+    $builder->status(201);
+    my $code = $builder->status;
+
+Sets the status, or reads it: the current value's status, else the collected
+status, else 200. An invalid status croaks when it is set.
+
+## status\_try
+
+Sets the status unless ["has\_status"](#has_status).
+
+## has\_status
+
+True when a status was collected, or the current value has one (a Redirect
+or Problem does).
+
+## header
+
+    $builder->header('X-Example' => 'one');
+    my $value = $builder->header('X-Example');
+
+Adds a header field, or reads one as ["header" in PAGI::Response](https://metacpan.org/pod/PAGI%3A%3AResponse#header) does. The
+value must be a defined string, for every field. A `Content-Type` name with
+a defined value means ["content\_type"](#content_type); clear the type with
+`content_type(undef)` or ["remove\_header"](#remove_header).
+
+## header\_all
+
+Every value of a field, as an arrayref.
+
+## has\_header
+
+True when the field is present: on the current value if there is one, else
+in the collected headers.
+
+## header\_try
+
+Adds the field unless it is present.
+
+## remove\_header
+
+Removes every value of a field. A `Content-Type` name means
+`content_type(undef)`.
+
+## content\_type
+
+    $builder->content_type('text/csv');
+    $builder->content_type(undef);
+
+Sets, clears or reads the Content-Type. Clearing means the body class's
+default. The body class may adjust the type: Text and HTML add
+`; charset=utf-8` to one without a charset, except JSON types (see
+[PAGI::Response::Text](https://metacpan.org/pod/PAGI%3A%3AResponse%3A%3AText)).
+
+## content\_type\_try
+
+Sets the Content-Type unless one is present. After a body, the class's
+default counts as present, so `text('x')->content_type_try('text/csv')`
+keeps `text/plain; charset=utf-8`.
+
+## has\_content\_type
+
+True when a Content-Type is present: on the current value if there is one,
+else collected.
+
+## cookie
+
+    $builder->cookie(session => $id, httponly => 1, samesite => 'Lax');
+
+Adds a `Set-Cookie` field. The options are those of
+["cookie" in PAGI::Response](https://metacpan.org/pod/PAGI%3A%3AResponse#cookie).
+
+## delete\_cookie
+
+Adds a `Set-Cookie` field that expires the cookie.
+
+# CHOOSING THE BODY
+
+Each method builds the value now and returns the builder.
+
+## as
+
+    $builder->as('JSON', $data);
+    $builder->as('+My::Response', $value);
+    $builder->as('File', $path, filename => 'report.pdf');
+    $builder->as('Redirect', '/moved', status => 301);
+    $builder->as('Empty');
+
+Builds `response($name, @arguments, ...)`: the arguments go to the class
+unchanged, followed by the collected status, headers and Content-Type. So any
+response class works, whatever its constructor takes, and its own rules apply
+(Empty, for example, refuses a collected Content-Type). `$name` resolves as
+in ["response" in PAGI::Response](https://metacpan.org/pod/PAGI%3A%3AResponse#response).
+
+The arguments are read as the response classes read theirs: positional
+values, then name/value pairs. A `status` among the pairs belongs to this
+body: it replaces the collected status for it and is not collected, as with
+["redirect"](#redirect). `headers` and `content_type` croak, since the builder owns
+them.
+
+## text
+
+    $builder->text($string);
+
+`as('Text', $string)`. The string must be defined and not a reference; a
+framework that renders other values stringifies them first, in its own
+override.
+
+## html
+
+    $builder->html($string);
+
+`as('HTML', $string)`, with the same rule for the string as ["text"](#text).
+
+## json
+
+    $builder->json($data);
+
+`as('JSON', $data)`. Data that cannot be encoded croaks here.
+
+## redirect
+
+    $builder->redirect('/login');
+    $builder->redirect('/moved', 301);
+
+`as('Redirect', $url, status =` $status)>, the status defaulting to 302. It
+belongs to the value rather than the collected state.
+
+## file
+
+    $builder->file($path, filename => 'report.pdf');
+
+`as('File', $path, @options)`. The file is checked when the response is
+sent, not here (see ["ERROR TIMING"](#error-timing)).
+
+## stream
+
+    $builder->stream(async sub { my ($writer) = @_; await $writer->write($chunk) });
+
+`as('Stream', $producer, @options)`. The producer runs after the response
+has started.
+
+## empty
+
+An Empty response with the collected status, or 200, and no Content-Type.
+This is the builder's own empty response, not `as('Empty')`: it leaves a
+collected Content-Type out instead of passing it to Empty, which refuses one.
+
+## has\_body\_source
+
+True once a body method has succeeded.
+
+# FINISHING
+
+## response
+
+The current value. With no body chosen, a new Empty value (as ["empty"](#empty)
+builds) each time it is called.
+
+## to\_app
+
+    await $builder->to_app->($scope, $receive, $send);
+
+The current value's application.
+
+# SUBCLASSING
+
+Frameworks extend this class. A subclass may rely on the following.
+
+- Builder state lives under the `_response_builder` key of the
+blessed hash, so a subclass's own keys, including Moo and Mooish attributes,
+do not collide with it. There is no `BUILD` or `DEMOLISH` logic, and the
+builder holds no scope, connection or sender.
+- ["new"](#new) takes no arguments; a Moo subclass's `FOREIGNBUILDARGS`
+returns an empty list.
+- Every public method is an ordinary method that a subclass may
+override and call with `SUPER::`. Coercing input before the builder sees it
+(a framework that renders exception objects stringifies them in its `text`)
+is the intended pattern.
+- Some methods call others through `$self`, so an override sees those
+calls too:
+
+    - `text`, `html`, `json`, `file`, `stream` and `redirect` call
+    ["as"](#as). `empty` builds the builder's own empty response and does not.
+    - `cookie`, `delete_cookie` and `header_try` call ["header"](#header).
+    - `header` and `remove_header` with a `Content-Type` name, and
+    `content_type_try`, call ["content\_type"](#content_type); `status_try` calls ["status"](#status).
+    - `to_app` calls ["response"](#response).
+
+    An override of ["as"](#as) must not call back into the shorthands (`text` and
+    the others): they call `as`, so the two would recurse.
+
+- Errors raised through the builder name the line that called it, or
+that called a subclass's method: the builder is internal to [Carp](https://metacpan.org/pod/Carp), and Carp
+trusts a subclass through its `@ISA`.
+
+# SEE ALSO
+
+[PAGI::Tools](https://metacpan.org/pod/PAGI%3A%3ATools), [PAGI::Response](https://metacpan.org/pod/PAGI%3A%3AResponse), ["response" in PAGI::Response](https://metacpan.org/pod/PAGI%3A%3AResponse#response)
+
+# AUTHOR
+
+John Napiorkowski <jjnapiork@cpan.org>
+
+# LICENSE
+
+This library is free software; you may redistribute it and/or modify it under
+the same terms as the Artistic License 2.0.

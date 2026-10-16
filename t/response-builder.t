@@ -279,6 +279,19 @@ subtest "a status is refused exactly when a response value's setter refuses it" 
     }
 };
 
+subtest "errors raised through a subclass's method name its caller's line" => sub {
+    eval q{
+#line 1 "My/Plain/Response.pm"
+        package My::Plain::Response;
+        our @ISA = ('PAGI::ResponseBuilder');
+        sub text { my ($self, @args) = @_; return $self->SUPER::text(@args) }
+        1;
+    } or die $@;
+    my $file = quotemeta __FILE__;
+    like dies { My::Plain::Response->new->status(204)->text('x') },
+        qr/forbidden for status 204 at $file line/, 'not the subclass file';
+};
+
 subtest 'subclass keys do not collide' => sub {
     my $b = My::Framework::Response->new;
     $b->status(201)->text('x');
