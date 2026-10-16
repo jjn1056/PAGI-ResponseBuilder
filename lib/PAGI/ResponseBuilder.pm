@@ -4,6 +4,7 @@ use strict;
 use warnings;
 
 use Carp qw(croak);
+use Cookie::Baker ();
 use PAGI::Headers;
 # Not imported: this class's own response() method would replace it.
 use PAGI::Response ();
@@ -149,8 +150,20 @@ sub has_content_type { $_[0]->has_header('Content-Type') }
 
 sub cookie {
     my ($self, $name, $value, %options) = @_;
-    return $self->header('Set-Cookie',
-        PAGI::Response::_set_cookie_value($name, $value, %options));
+    return $self->header('Set-Cookie', _set_cookie_value($name, $value, %options));
+}
+
+# A Set-Cookie value, formatted as PAGI::Response's own cookie() formats one.
+sub _set_cookie_value {
+    my ($name, $value, %options) = @_;
+    my %cookie = (value => $value, path => $options{path} // '/');
+    $cookie{domain}    = $options{domain}  if defined $options{domain};
+    $cookie{expires}   = $options{expires} if defined $options{expires};
+    $cookie{'max-age'} = $options{max_age} if defined $options{max_age};
+    $cookie{secure}    = $options{secure} if $options{secure};
+    $cookie{httponly}  = $options{httponly} if $options{httponly};
+    $cookie{samesite}  = $options{samesite} if defined $options{samesite};
+    return Cookie::Baker::bake_cookie($name, \%cookie);
 }
 
 sub delete_cookie {

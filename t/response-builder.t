@@ -255,6 +255,19 @@ subtest 'delete_cookie' => sub {
         qr/\Asession=; .*max-age=0/i;
 };
 
+subtest "cookies are formatted as PAGI::Response's own" => sub {
+    my %options = (path => '/app', domain => 'example.com', expires => 1767225600,
+        max_age => 3600, secure => 1, httponly => 1, samesite => 'Strict');
+    my $tools = PAGI::Test::Client->new(
+        app => PAGI::Response::response('Text', 'x')->cookie(session => 'abc', %options)->to_app)->get('/');
+    my $mine = sent(builder()->cookie(session => 'abc', %options)->text('x'));
+    is $mine->header('set-cookie'), $tools->header('set-cookie'), 'every option';
+    is sent(builder()->cookie(a => 1)->text('x'))->header('set-cookie'),
+        PAGI::Test::Client->new(app => PAGI::Response::response('Text', 'x')->cookie(a => 1)->to_app)
+            ->get('/')->header('set-cookie'),
+        'no options';
+};
+
 subtest 'subclass keys do not collide' => sub {
     my $b = My::Framework::Response->new;
     $b->status(201)->text('x');
