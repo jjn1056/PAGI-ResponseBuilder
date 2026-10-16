@@ -9,6 +9,10 @@ use PAGI::Headers;
 # Not imported: this class's own response() method would replace it.
 use PAGI::Response ();
 
+# An error raised while the builder works, by the builder or by the response
+# value it holds, names the line that called the builder, not a line in here.
+$Carp::Internal{'PAGI::ResponseBuilder'}++;
+
 # All state lives under one key, so a subclass's own keys (including Moo and
 # Mooish attributes) cannot collide with it.
 sub new {
