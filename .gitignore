@@ -1,0 +1,42 @@
+# Perl build artifacts
+Makefile
+Makefile.old
+MANIFEST
+MANIFEST.bak
+META.json
+META.yml
+MYMETA.json
+MYMETA.yml
+blib/
+pm_to_blib
+*.tar.gz
+
+# Dist::Zilla
+PAGI-ResponseBuilder-*/
+.build/
+
+# Editor files
+*~
+*.swp
+.*.swp
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Local testing
+local/
+*.log
+
+# AI
+.claude
+CLAUDE.md
+AGENTS.md
+TODO*.md
+
+# Local working docs
+docs/
+.superpowers/

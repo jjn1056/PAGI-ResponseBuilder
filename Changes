@@ -1,0 +1,7 @@
+# Revision history for PAGI-ResponseBuilder
+
+0.001000 - unreleased
+
+  - PAGI::ResponseBuilder: collects a response's status, headers and cookies
+    in stages and builds the body last, as an ordinary PAGI-Tools response
+    value, for frameworks whose API sets those before the body.
