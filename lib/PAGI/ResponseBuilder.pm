@@ -44,10 +44,18 @@ sub status {
     if ($state->{value}) {
         $state->{value}->status($code);
     } else {
-        PAGI::Response::_validate_status($code);
+        _validate_status($code);
     }
     $state->{status} = $code;
     return $self;
+}
+
+# The status rule PAGI::Response's status setter applies.
+sub _validate_status {
+    my ($code) = @_;
+    croak 'Status must be a number between 100-599'
+        unless defined $code && !ref($code) && $code =~ /\A\d+\z/ && $code >= 100 && $code <= 599;
+    return;
 }
 
 sub status_try {

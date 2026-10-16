@@ -268,6 +268,17 @@ subtest "cookies are formatted as PAGI::Response's own" => sub {
         'no options';
 };
 
+subtest "a status is refused exactly when a response value's setter refuses it" => sub {
+    for my $code (undef, '', 'abc', 99, 100, 200, '0200', 599, 600, '200x', ' 200', 2.5, []) {
+        my $label = defined $code ? (ref $code ? 'a reference' : "'$code'") : 'undef';
+        my $tools = dies { PAGI::Response::response('Empty')->status($code) };
+        my $mine  = dies { builder()->status($code) };
+        is defined $mine, defined $tools, "$label: refused alike";
+        is $mine =~ s/ at .*//sr, $tools =~ s/ at .*//sr, "$label: same message"
+            if defined $tools;
+    }
+};
+
 subtest 'subclass keys do not collide' => sub {
     my $b = My::Framework::Response->new;
     $b->status(201)->text('x');
