@@ -109,7 +109,7 @@ or Problem does).
     $builder->header('X-Example' => 'one');
     my $value = $builder->header('X-Example');
 
-Adds a header field, or reads one as ["header" in PAGI::Response](https://metacpan.org/pod/PAGI%3A%3AResponse#header) does. The
+Adds a header field, or reads one as a response value's `header` does (["metadata" in PAGI::Response](https://metacpan.org/pod/PAGI%3A%3AResponse#metadata)). The
 value must be a defined string, for every field. A `Content-Type` name with
 a defined value means ["content\_type"](#content_type); clear the type with
 `content_type(undef)` or ["remove\_header"](#remove_header).
@@ -157,12 +157,21 @@ else collected.
 
     $builder->cookie(session => $id, httponly => 1, samesite => 'Lax');
 
-Adds a `Set-Cookie` field. The options are those of
-["cookie" in PAGI::Response](https://metacpan.org/pod/PAGI%3A%3AResponse#cookie).
+Adds a `Set-Cookie` field, formatted as a response value's `cookie`
+formats one. The options:
+
+- `path`: defaults to `/`.
+- `domain`, `expires` and `samesite`: sent as given, when defined.
+- `max_age`: sent as `Max-Age`, when defined.
+- `secure` and `httponly`: flags, sent when true.
 
 ## delete\_cookie
 
-Adds a `Set-Cookie` field that expires the cookie.
+    $builder->delete_cookie('session', path => '/app');
+
+Adds a `Set-Cookie` field that expires the cookie: ["cookie"](#cookie) with an empty
+value, `max_age` 0 and `expires` 0. It takes ["cookie"](#cookie)'s options, so a
+`path` or `domain` can match the cookie it expires.
 
 # CHOOSING THE BODY
 
@@ -206,7 +215,7 @@ override.
 
     $builder->json($data);
 
-`as('JSON', $data)`. Data that cannot be encoded croaks here.
+`as('JSON', $data)`. Data that cannot be encoded dies here.
 
 ## redirect
 
@@ -272,7 +281,11 @@ calls too:
 
     - `text`, `html`, `json`, `file`, `stream` and `redirect` call
     ["as"](#as). `empty` builds the builder's own empty response and does not.
-    - `cookie`, `delete_cookie` and `header_try` call ["header"](#header).
+    - `cookie` and `header_try` call ["header"](#header); `delete_cookie` calls
+    ["cookie"](#cookie).
+    - `status_try`, `header_try` and `content_type_try` ask
+    ["has\_status"](#has_status), ["has\_header"](#has_header) and ["has\_content\_type"](#has_content_type) first;
+    `has_content_type` calls ["has\_header"](#has_header).
     - `header` and `remove_header` with a `Content-Type` name, and
     `content_type_try`, call ["content\_type"](#content_type); `status_try` calls ["status"](#status).
     - `to_app` calls ["response"](#response).
@@ -280,9 +293,13 @@ calls too:
     An override of ["as"](#as) must not call back into the shorthands (`text` and
     the others): they call `as`, so the two would recurse.
 
-- Errors raised through the builder name the line that called it, or
-that called a subclass's method: the builder is internal to [Carp](https://metacpan.org/pod/Carp), and Carp
-trusts a subclass through its `@ISA`.
+- Errors the builder and the response classes raise with [Carp](https://metacpan.org/pod/Carp)
+name the line that called the builder, or that called a subclass's method:
+the builder is internal to Carp, and Carp trusts a subclass through its
+`@ISA`. A subclass that sets `@CARP_NOT` replaces that trust, so it lists
+`PAGI::ResponseBuilder` there too. Errors a response class raises with
+`die` name the class's own line: a Text or HTML body that is not a defined
+string, and JSON data that cannot be encoded.
 
 # SEE ALSO
 

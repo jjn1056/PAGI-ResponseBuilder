@@ -419,7 +419,7 @@ or Problem does).
     $builder->header('X-Example' => 'one');
     my $value = $builder->header('X-Example');
 
-Adds a header field, or reads one as L<PAGI::Response/header> does. The
+Adds a header field, or reads one as a response value's C<header> does (L<PAGI::Response/metadata>). The
 value must be a defined string, for every field. A C<Content-Type> name with
 a defined value means L</content_type>; clear the type with
 C<content_type(undef)> or L</remove_header>.
@@ -467,12 +467,28 @@ else collected.
 
     $builder->cookie(session => $id, httponly => 1, samesite => 'Lax');
 
-Adds a C<Set-Cookie> field. The options are those of
-L<PAGI::Response/cookie>.
+Adds a C<Set-Cookie> field, formatted as a response value's C<cookie>
+formats one. The options:
+
+=over 4
+
+=item * C<path>: defaults to C</>.
+
+=item * C<domain>, C<expires> and C<samesite>: sent as given, when defined.
+
+=item * C<max_age>: sent as C<Max-Age>, when defined.
+
+=item * C<secure> and C<httponly>: flags, sent when true.
+
+=back
 
 =head2 delete_cookie
 
-Adds a C<Set-Cookie> field that expires the cookie.
+    $builder->delete_cookie('session', path => '/app');
+
+Adds a C<Set-Cookie> field that expires the cookie: L</cookie> with an empty
+value, C<max_age> 0 and C<expires> 0. It takes L</cookie>'s options, so a
+C<path> or C<domain> can match the cookie it expires.
 
 =head1 CHOOSING THE BODY
 
@@ -516,7 +532,7 @@ C<as('HTML', $string)>, with the same rule for the string as L</text>.
 
     $builder->json($data);
 
-C<as('JSON', $data)>. Data that cannot be encoded croaks here.
+C<as('JSON', $data)>. Data that cannot be encoded dies here.
 
 =head2 redirect
 
@@ -590,7 +606,12 @@ calls too:
 =item * C<text>, C<html>, C<json>, C<file>, C<stream> and C<redirect> call
 L</as>. C<empty> builds the builder's own empty response and does not.
 
-=item * C<cookie>, C<delete_cookie> and C<header_try> call L</header>.
+=item * C<cookie> and C<header_try> call L</header>; C<delete_cookie> calls
+L</cookie>.
+
+=item * C<status_try>, C<header_try> and C<content_type_try> ask
+L</has_status>, L</has_header> and L</has_content_type> first;
+C<has_content_type> calls L</has_header>.
 
 =item * C<header> and C<remove_header> with a C<Content-Type> name, and
 C<content_type_try>, call L</content_type>; C<status_try> calls L</status>.
@@ -602,9 +623,13 @@ C<content_type_try>, call L</content_type>; C<status_try> calls L</status>.
 An override of L</as> must not call back into the shorthands (C<text> and
 the others): they call C<as>, so the two would recurse.
 
-=item * Errors raised through the builder name the line that called it, or
-that called a subclass's method: the builder is internal to L<Carp>, and Carp
-trusts a subclass through its C<@ISA>.
+=item * Errors the builder and the response classes raise with L<Carp>
+name the line that called the builder, or that called a subclass's method:
+the builder is internal to Carp, and Carp trusts a subclass through its
+C<@ISA>. A subclass that sets C<@CARP_NOT> replaces that trust, so it lists
+C<PAGI::ResponseBuilder> there too. Errors a response class raises with
+C<die> name the class's own line: a Text or HTML body that is not a defined
+string, and JSON data that cannot be encoded.
 
 =back
 

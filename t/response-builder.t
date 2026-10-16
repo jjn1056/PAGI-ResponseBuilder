@@ -295,6 +295,24 @@ subtest "errors raised through a subclass's method name its caller's line" => su
     my $file = quotemeta __FILE__;
     like dies { My::Plain::Response->new->status(204)->text('x') },
         qr/forbidden for status 204 at $file line/, 'not the subclass file';
+
+    # @CARP_NOT replaces the trust @ISA gives, so it must list the builder.
+    for my $listed (0, 1) {
+        my $class = $listed ? 'My::Listing::Response' : 'My::Unlisted::Response';
+        my $list = join ', ', map {"'$_'"} 'Some::Other', ($listed ? 'PAGI::ResponseBuilder' : ());
+        eval qq{
+#line 1 "$class.pm"
+            package $class;
+            our \@ISA = ('PAGI::ResponseBuilder');
+            our \@CARP_NOT = ($list);
+            sub text { my (\$self, \@args) = \@_; return \$self->SUPER::text(\@args) }
+            1;
+        } or die $@;
+    }
+    like dies { My::Unlisted::Response->new->status(204)->text('x') },
+        qr/at My::Unlisted::Response\.pm line/, '@CARP_NOT without the builder: the subclass line';
+    like dies { My::Listing::Response->new->status(204)->text('x') },
+        qr/at $file line/, "\@CARP_NOT listing the builder: the caller's line";
 };
 
 subtest 'subclass keys do not collide' => sub {
@@ -335,6 +353,35 @@ subtest 'documented delegation between methods' => sub {
         [qw(as:Text as:HTML as:JSON as:File as:Stream as:Redirect
             header:Set-Cookie header:Set-Cookie header:X-T)],
         'body methods call as() except empty(); cookies and header_try call header()';
+};
+
+# Records each call a method makes through $self, for the delegation
+# documented under SUBCLASSING.
+BEGIN {
+    package My::Tracing::Response;
+    our @ISA = ('PAGI::ResponseBuilder');
+    our @calls;
+    for my $method (qw(status has_status header has_header content_type
+                       has_content_type cookie)) {
+        no strict 'refs';
+        *{$method} = sub { push @calls, $method; my $super = "PAGI::ResponseBuilder::$method"; shift->$super(@_) };
+    }
+}
+
+subtest 'documented delegation of the _try, has_ and cookie methods' => sub {
+    my %expected = (
+        status_try       => [qw(has_status status)],
+        header_try       => [qw(has_header header)],
+        content_type_try => [qw(has_content_type has_header content_type)],
+        delete_cookie    => [qw(cookie header)],
+    );
+    my %arguments = (status_try => [201], header_try => ['X-T' => 1],
+        content_type_try => ['text/csv'], delete_cookie => ['b']);
+    for my $method (sort keys %expected) {
+        @My::Tracing::Response::calls = ();
+        My::Tracing::Response->new->$method(@{ $arguments{$method} });
+        is \@My::Tracing::Response::calls, $expected{$method}, $method;
+    }
 };
 
 done_testing;
