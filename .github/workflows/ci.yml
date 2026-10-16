@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Perl ${{ matrix.perl }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        perl: ['5.42', '5.40', '5.38', '5.36']
+
+    # The tests run against a PAGI-Tools checkout beside this one
+    # (prove -I../PAGI-Tools/lib), as they are run locally: the PAGI-Tools
+    # release line this distribution requires is not on CPAN yet.
+    defaults:
+      run:
+        working-directory: PAGI-ResponseBuilder
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: PAGI-ResponseBuilder
+
+      - uses: actions/checkout@v4
+        with:
+          repository: jjn1056/PAGI-Tools
+          ref: main
+          path: PAGI-Tools
+
+      - name: Setup Perl ${{ matrix.perl }}
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: ${{ matrix.perl }}
+
+      # Only the PAGI-Tools checkout's dependencies: this distribution's own
+      # cpanfile requires PAGI::Tools 0.003000, which cpanm cannot find on CPAN
+      # yet, and every other module it needs is a PAGI-Tools dependency too.
+      # --mirror-only: resolve versions from the mirror's own index rather than
+      # cpanm's metadata service, which can name a release the mirrors have
+      # not synced yet.
+      - name: Install dependencies
+        run: cpanm --notest --mirror https://cpan.metacpan.org --mirror-only --installdeps ../PAGI-Tools
+
+      # Fails the job when the checkout's PAGI::Tools is not the release line
+      # this distribution requires.
+      - name: Report what the tests see
+        run: |
+          perl -I../PAGI-Tools/lib -MPAGI::Tools -e 'PAGI::Tools->VERSION("0.003000"); print "PAGI::Tools $PAGI::Tools::VERSION (PAGI-Tools main)\n"'
+          perl -MCookie::Baker -e 'print "Cookie::Baker $Cookie::Baker::VERSION\n"'
+
+      - name: Run tests
+        run: prove -I../PAGI-Tools/lib -lr t/
