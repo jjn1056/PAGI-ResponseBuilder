@@ -266,6 +266,11 @@ subtest "cookies are formatted as PAGI::Response's own" => sub {
         PAGI::Test::Client->new(app => PAGI::Response::response('Text', 'x')->cookie(a => 1)->to_app)
             ->get('/')->header('set-cookie'),
         'no options';
+    is sent(builder()->delete_cookie(session => path => '/app')->text('x'))->header('set-cookie'),
+        PAGI::Test::Client->new(
+            app => PAGI::Response::response('Text', 'x')->delete_cookie(session => path => '/app')->to_app)
+            ->get('/')->header('set-cookie'),
+        'delete_cookie';
 };
 
 subtest "a status is refused exactly when a response value's setter refuses it" => sub {
