@@ -118,6 +118,15 @@ a defined value means ["content\_type"](#content_type); clear the type with
 
 Every value of a field, as an arrayref.
 
+## headers
+
+    my $fields = $builder->headers;    # a PAGI::Headers
+
+A copy of the header fields as they stand, as a [PAGI::Headers](https://metacpan.org/pod/PAGI%3A%3AHeaders): the current
+value's own once a body is chosen, Content-Type included; before that, the
+collected fields, cookies included, with a collected Content-Type last. It is
+a copy: changing it does not change the builder.
+
 ## has\_header
 
 True when the field is present: on the current value if there is one, else
@@ -200,22 +209,44 @@ them.
 ## text
 
     $builder->text($string);
+    $builder->text($string, status => 404);
 
-`as('Text', $string)`. The string must be defined and not a reference; a
-framework that renders other values stringifies them first, in its own
-override.
+`as('Text', $string, ...)`. The string must be defined and not a reference;
+a framework that renders other values stringifies them first, in its own
+override. A trailing `status` belongs to this body, as with ["as"](#as); headers
+and the Content-Type are the builder's, and croak here.
 
 ## html
 
     $builder->html($string);
+    $builder->html($string, status => 404);
 
-`as('HTML', $string)`, with the same rule for the string as ["text"](#text).
+`as('HTML', $string, ...)`, with the same rules as ["text"](#text).
 
 ## json
 
     $builder->json($data);
+    $builder->json($data, status => 422);
 
-`as('JSON', $data)`. Data that cannot be encoded dies here.
+`as('JSON', $data, ...)`, taking a trailing `status` as ["text"](#text) does. Data
+that cannot be encoded dies here.
+
+## bytes
+
+    $builder->bytes($encoded);
+    $builder->content_type('image/png')->bytes($png, status => 201);
+
+`as('+PAGI::Response', $encoded, ...)`: a body of bytes already encoded,
+sent as they are, with `application/octet-stream` unless a Content-Type is
+collected. Characters croak; encode them first. It takes a trailing `status`
+as ["text"](#text) does.
+
+## problem
+
+    $builder->problem({ type => '/problems/out-of-stock', title => 'Out of stock', status => 409 });
+
+`as('Problem', ...)`: an RFC 9457 problem details response, its arguments
+those of [PAGI::Response::Problem](https://metacpan.org/pod/PAGI%3A%3AResponse%3A%3AProblem).
 
 ## redirect
 
@@ -262,6 +293,87 @@ builds) each time it is called.
 
 The current value's application.
 
+# COOKBOOK
+
+Each recipe starts from a fresh builder, `my $res = PAGI::ResponseBuilder->new`,
+and leaves in it the response a framework would send with `$res->to_app`.
+Collecting and choosing chain: every method returns the builder.
+
+## Text with a status
+
+    $res->status(201)->text("Created\n");
+
+## JSON, with a header and a cookie collected first
+
+A before-hook and the session code add to the response; the handler picks the
+body last, and keeps what they added.
+
+    $res->header('X-Request-Id' => 'req-42');
+    $res->cookie(session => 'abc123', httponly => 1, samesite => 'Lax');
+    $res->json({ id => 7, name => 'ada' });
+
+## HTML
+
+    $res->html('<p>Hello, <b>world</b></p>');
+
+## A redirect after a form post, keeping a cookie
+
+    $res->cookie(flash => 'saved')->redirect('/items/7', 303);
+
+## No content
+
+    $res->status(204)->empty;
+
+## A Problem details error
+
+    $res->problem({
+        type   => '/problems/out-of-stock',
+        title  => 'Out of stock',
+        status => 409,
+    });
+
+## A file download
+
+The file is read when the response is sent, not when it is chosen.
+
+    $res->file('reports/2026-10.csv', filename => 'october.csv');
+
+## A streamed body
+
+    $res->content_type('text/csv')->stream(async sub {
+        my ($writer) = @_;
+        await $writer->write("id,name\n");
+        await $writer->write("7,ada\n");
+    });
+
+## Text in a charset other than UTF-8
+
+Text and HTML always send UTF-8. For another charset, encode the text and
+send the bytes.
+
+    use Encode qw(encode);
+
+    $res->content_type('text/plain; charset=iso-8859-1')
+        ->bytes(encode('iso-8859-1', "caf\x{e9}"));
+
+## Replacing the body when the handler fails
+
+A body method replaces the body chosen before it, and the headers and cookies
+collected so far are kept, so an error handler can answer in place of a
+response the handler already chose.
+
+    $res->header('X-Request-Id' => 'req-42')->json({ ok => 1 });
+
+    # ... the handler then dies, and the framework's error handler answers:
+    $res->status(500)->text('Internal Server Error');
+
+## A response class of your own
+
+["as"](#as) builds any response class, so a class written for one application is
+chosen the same way as Tools' own.
+
+    $res->as('+My::Response::CSV', [ [qw(id name)], [7, 'ada'] ]);
+
 # SUBCLASSING
 
 Frameworks extend this class. A subclass may rely on the following.
@@ -279,7 +391,7 @@ is the intended pattern.
 - Some methods call others through `$self`, so an override sees those
 calls too:
 
-    - `text`, `html`, `json`, `file`, `stream` and `redirect` call
+    - `text`, `html`, `json`, `bytes`, `problem`, `file`, `stream` and `redirect` call
     ["as"](#as). `empty` builds the builder's own empty response and does not.
     - `cookie` and `header_try` call ["header"](#header); `delete_cookie` calls
     ["cookie"](#cookie).

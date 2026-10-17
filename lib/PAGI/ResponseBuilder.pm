@@ -103,6 +103,17 @@ sub header_all {
     return [ $state->{headers}->get_all($name) ];
 }
 
+# A copy, so a change to it cannot put the collected state and the value out
+# of step.
+sub headers {
+    my ($self) = @_;
+    my $state = $self->_state;
+    return $state->{value}->headers->clone if $state->{value};
+    my $headers = $state->{headers}->clone;
+    $headers->add('Content-Type' => $state->{content_type}) if defined $state->{content_type};
+    return $headers;
+}
+
 sub has_header {
     my ($self, $name) = @_;
     return 0 unless defined $name && !ref($name) && length $name;
@@ -210,20 +221,31 @@ sub _builder_options {
 
 sub text {
     my ($self, @arguments) = @_;
-    croak 'text() takes one argument' unless @arguments == 1;
-    return $self->as('Text', $arguments[0]);
+    croak 'text() takes a body and an optional status' unless @arguments;
+    return $self->as('Text', @arguments);
 }
 
 sub html {
     my ($self, @arguments) = @_;
-    croak 'html() takes one argument' unless @arguments == 1;
-    return $self->as('HTML', $arguments[0]);
+    croak 'html() takes a body and an optional status' unless @arguments;
+    return $self->as('HTML', @arguments);
 }
 
 sub json {
     my ($self, @arguments) = @_;
-    croak 'json() takes one argument' unless @arguments == 1;
-    return $self->as('JSON', $arguments[0]);
+    croak 'json() takes a body and an optional status' unless @arguments;
+    return $self->as('JSON', @arguments);
+}
+
+sub bytes {
+    my ($self, @arguments) = @_;
+    croak 'bytes() takes encoded bytes and an optional status' unless @arguments;
+    return $self->as('+PAGI::Response', @arguments);
+}
+
+sub problem {
+    my ($self, @arguments) = @_;
+    return $self->as('Problem', @arguments);
 }
 
 sub redirect {
@@ -428,6 +450,15 @@ C<content_type(undef)> or L</remove_header>.
 
 Every value of a field, as an arrayref.
 
+=head2 headers
+
+    my $fields = $builder->headers;    # a PAGI::Headers
+
+A copy of the header fields as they stand, as a L<PAGI::Headers>: the current
+value's own once a body is chosen, Content-Type included; before that, the
+collected fields, cookies included, with a collected Content-Type last. It is
+a copy: changing it does not change the builder.
+
 =head2 has_header
 
 True when the field is present: on the current value if there is one, else
@@ -517,22 +548,44 @@ them.
 =head2 text
 
     $builder->text($string);
+    $builder->text($string, status => 404);
 
-C<as('Text', $string)>. The string must be defined and not a reference; a
-framework that renders other values stringifies them first, in its own
-override.
+C<as('Text', $string, ...)>. The string must be defined and not a reference;
+a framework that renders other values stringifies them first, in its own
+override. A trailing C<status> belongs to this body, as with L</as>; headers
+and the Content-Type are the builder's, and croak here.
 
 =head2 html
 
     $builder->html($string);
+    $builder->html($string, status => 404);
 
-C<as('HTML', $string)>, with the same rule for the string as L</text>.
+C<as('HTML', $string, ...)>, with the same rules as L</text>.
 
 =head2 json
 
     $builder->json($data);
+    $builder->json($data, status => 422);
 
-C<as('JSON', $data)>. Data that cannot be encoded dies here.
+C<as('JSON', $data, ...)>, taking a trailing C<status> as L</text> does. Data
+that cannot be encoded dies here.
+
+=head2 bytes
+
+    $builder->bytes($encoded);
+    $builder->content_type('image/png')->bytes($png, status => 201);
+
+C<as('+PAGI::Response', $encoded, ...)>: a body of bytes already encoded,
+sent as they are, with C<application/octet-stream> unless a Content-Type is
+collected. Characters croak; encode them first. It takes a trailing C<status>
+as L</text> does.
+
+=head2 problem
+
+    $builder->problem({ type => '/problems/out-of-stock', title => 'Out of stock', status => 409 });
+
+C<as('Problem', ...)>: an RFC 9457 problem details response, its arguments
+those of L<PAGI::Response::Problem>.
 
 =head2 redirect
 
@@ -579,6 +632,87 @@ builds) each time it is called.
 
 The current value's application.
 
+=head1 COOKBOOK
+
+Each recipe starts from a fresh builder, C<< my $res = PAGI::ResponseBuilder->new >>,
+and leaves in it the response a framework would send with C<< $res->to_app >>.
+Collecting and choosing chain: every method returns the builder.
+
+=head2 Text with a status
+
+    $res->status(201)->text("Created\n");
+
+=head2 JSON, with a header and a cookie collected first
+
+A before-hook and the session code add to the response; the handler picks the
+body last, and keeps what they added.
+
+    $res->header('X-Request-Id' => 'req-42');
+    $res->cookie(session => 'abc123', httponly => 1, samesite => 'Lax');
+    $res->json({ id => 7, name => 'ada' });
+
+=head2 HTML
+
+    $res->html('<p>Hello, <b>world</b></p>');
+
+=head2 A redirect after a form post, keeping a cookie
+
+    $res->cookie(flash => 'saved')->redirect('/items/7', 303);
+
+=head2 No content
+
+    $res->status(204)->empty;
+
+=head2 A Problem details error
+
+    $res->problem({
+        type   => '/problems/out-of-stock',
+        title  => 'Out of stock',
+        status => 409,
+    });
+
+=head2 A file download
+
+The file is read when the response is sent, not when it is chosen.
+
+    $res->file('reports/2026-10.csv', filename => 'october.csv');
+
+=head2 A streamed body
+
+    $res->content_type('text/csv')->stream(async sub {
+        my ($writer) = @_;
+        await $writer->write("id,name\n");
+        await $writer->write("7,ada\n");
+    });
+
+=head2 Text in a charset other than UTF-8
+
+Text and HTML always send UTF-8. For another charset, encode the text and
+send the bytes.
+
+    use Encode qw(encode);
+
+    $res->content_type('text/plain; charset=iso-8859-1')
+        ->bytes(encode('iso-8859-1', "caf\x{e9}"));
+
+=head2 Replacing the body when the handler fails
+
+A body method replaces the body chosen before it, and the headers and cookies
+collected so far are kept, so an error handler can answer in place of a
+response the handler already chose.
+
+    $res->header('X-Request-Id' => 'req-42')->json({ ok => 1 });
+
+    # ... the handler then dies, and the framework's error handler answers:
+    $res->status(500)->text('Internal Server Error');
+
+=head2 A response class of your own
+
+L</as> builds any response class, so a class written for one application is
+chosen the same way as Tools' own.
+
+    $res->as('+My::Response::CSV', [ [qw(id name)], [7, 'ada'] ]);
+
 =head1 SUBCLASSING
 
 Frameworks extend this class. A subclass may rely on the following.
@@ -603,7 +737,7 @@ calls too:
 
 =over 4
 
-=item * C<text>, C<html>, C<json>, C<file>, C<stream> and C<redirect> call
+=item * C<text>, C<html>, C<json>, C<bytes>, C<problem>, C<file>, C<stream> and C<redirect> call
 L</as>. C<empty> builds the builder's own empty response and does not.
 
 =item * C<cookie> and C<header_try> call L</header>; C<delete_cookie> calls
