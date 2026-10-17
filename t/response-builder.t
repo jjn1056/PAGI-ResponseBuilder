@@ -215,7 +215,9 @@ subtest 'file options pass through; a missing file fails when sent' => sub {
 subtest 'text and html are strict' => sub {
     like dies { builder()->text(undef) }, qr/defined Unicode scalar/;
     like dies { builder()->text(bless {}, 'Some::Object') }, qr/defined Unicode scalar/;
-    like dies { builder()->text('a', 'b') }, qr/text\(\) takes one argument/;
+    like dies { builder()->text('a', 'b') }, qr/response options must be name\/value pairs/,
+        'a trailing value that is not a name/value pair';
+    like dies { builder()->text }, qr/text\(\) takes a body and an optional status/;
 };
 
 subtest 'refused setters change nothing' => sub {
@@ -347,10 +349,11 @@ subtest 'documented delegation between methods' => sub {
     @My::Recording::Response::calls = ();
     my $b = My::Recording::Response->new;
     $b->text('a')->html('b')->json({})->file(__FILE__)->stream(sub { Future->done });
+    $b->problem({ title => 'x', status => 400 });
     $b->redirect('/x')->empty;
     $b->cookie(a => 1)->delete_cookie('b')->header_try('X-T' => 1);
     is \@My::Recording::Response::calls,
-        [qw(as:Text as:HTML as:JSON as:File as:Stream as:Redirect
+        [qw(as:Text as:HTML as:JSON as:File as:Stream as:Problem as:Redirect
             header:Set-Cookie header:Set-Cookie header:X-T)],
         'body methods call as() except empty(); cookies and header_try call header()';
 };
@@ -382,6 +385,45 @@ subtest 'documented delegation of the _try, has_ and cookie methods' => sub {
         My::Tracing::Response->new->$method(@{ $arguments{$method} });
         is \@My::Tracing::Response::calls, $expected{$method}, $method;
     }
+};
+
+subtest 'headers is a copy of the header fields as they stand' => sub {
+    my $b = builder()->header('X-A' => 1)->cookie(s => 1)->content_type('text/csv');
+    my $before = $b->headers;
+    isa_ok $before, 'PAGI::Headers';
+    is [ map { [@$_] } @$before ],
+        [['X-A', 1], ['Set-Cookie', 's=1; path=/'], ['Content-Type', 'text/csv']],
+        'before a body: the collected fields, Content-Type last';
+
+    $b->text('x');
+    is [ map { [@$_] } @{ $b->headers } ], [ map { [@$_] } @{ $b->response->headers } ],
+        "after a body: the value's own fields";
+
+    $b->headers->add('X-Copy' => 1);
+    ok !$b->has_header('X-Copy'), 'changing the copy leaves the builder alone';
+};
+
+subtest 'text, html and json take a trailing status' => sub {
+    is sent(builder()->text('gone', status => 410))->status, 410, 'text';
+    is sent(builder()->html('<p>gone</p>', status => 410))->status, 410, 'html';
+    is sent(builder()->json({ gone => 1 }, status => 410))->status, 410, 'json';
+
+    my $b = builder()->text('gone', status => 410);
+    is sent($b->json({}))->status, 200, 'the status belongs to that body, as with as()';
+
+    like dies { builder()->text('x', headers => ['X-A' => 1]) },
+        qr/takes no 'headers' option: set it on the builder/, 'headers are still the builder\'s';
+    like dies { builder()->json({}, content_type => 'text/plain') },
+        qr/takes no 'content_type' option/, 'and so is the Content-Type';
+};
+
+subtest 'problem is as(Problem)' => sub {
+    my $res = sent(builder()->header('X-A' => 1)
+        ->problem({ title => 'Out of stock', status => 409 }));
+    is $res->status, 409;
+    is $res->header('content-type'), 'application/problem+json';
+    is $res->json->{title}, 'Out of stock';
+    is $res->header('x-a'), 1, 'collected headers are kept';
 };
 
 done_testing;

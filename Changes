@@ -9,3 +9,6 @@
     and cookies, HTML, redirect, no content, Problem, file, stream, another
     charset, replacing a body on error, a class of your own); a test runs
     each as published.
+  - problem() for as('Problem', ...); headers() returns a copy of the header
+    fields as a PAGI::Headers; text(), html() and json() take a trailing
+    status, as PAGI::Response's did before 0.003000.

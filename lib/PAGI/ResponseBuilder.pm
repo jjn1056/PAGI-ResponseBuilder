@@ -103,6 +103,17 @@ sub header_all {
     return [ $state->{headers}->get_all($name) ];
 }
 
+# A copy, so a change to it cannot put the collected state and the value out
+# of step.
+sub headers {
+    my ($self) = @_;
+    my $state = $self->_state;
+    return $state->{value}->headers->clone if $state->{value};
+    my $headers = $state->{headers}->clone;
+    $headers->add('Content-Type' => $state->{content_type}) if defined $state->{content_type};
+    return $headers;
+}
+
 sub has_header {
     my ($self, $name) = @_;
     return 0 unless defined $name && !ref($name) && length $name;
@@ -210,20 +221,25 @@ sub _builder_options {
 
 sub text {
     my ($self, @arguments) = @_;
-    croak 'text() takes one argument' unless @arguments == 1;
-    return $self->as('Text', $arguments[0]);
+    croak 'text() takes a body and an optional status' unless @arguments;
+    return $self->as('Text', @arguments);
 }
 
 sub html {
     my ($self, @arguments) = @_;
-    croak 'html() takes one argument' unless @arguments == 1;
-    return $self->as('HTML', $arguments[0]);
+    croak 'html() takes a body and an optional status' unless @arguments;
+    return $self->as('HTML', @arguments);
 }
 
 sub json {
     my ($self, @arguments) = @_;
-    croak 'json() takes one argument' unless @arguments == 1;
-    return $self->as('JSON', $arguments[0]);
+    croak 'json() takes a body and an optional status' unless @arguments;
+    return $self->as('JSON', @arguments);
+}
+
+sub problem {
+    my ($self, @arguments) = @_;
+    return $self->as('Problem', @arguments);
 }
 
 sub redirect {
@@ -428,6 +444,15 @@ C<content_type(undef)> or L</remove_header>.
 
 Every value of a field, as an arrayref.
 
+=head2 headers
+
+    my $fields = $builder->headers;    # a PAGI::Headers
+
+A copy of the header fields as they stand, as a L<PAGI::Headers>: the current
+value's own once a body is chosen, Content-Type included; before that, the
+collected fields, cookies included, with a collected Content-Type last. It is
+a copy: changing it does not change the builder.
+
 =head2 has_header
 
 True when the field is present: on the current value if there is one, else
@@ -517,22 +542,34 @@ them.
 =head2 text
 
     $builder->text($string);
+    $builder->text($string, status => 404);
 
-C<as('Text', $string)>. The string must be defined and not a reference; a
-framework that renders other values stringifies them first, in its own
-override.
+C<as('Text', $string, ...)>. The string must be defined and not a reference;
+a framework that renders other values stringifies them first, in its own
+override. A trailing C<status> belongs to this body, as with L</as>; headers
+and the Content-Type are the builder's, and croak here.
 
 =head2 html
 
     $builder->html($string);
+    $builder->html($string, status => 404);
 
-C<as('HTML', $string)>, with the same rule for the string as L</text>.
+C<as('HTML', $string, ...)>, with the same rules as L</text>.
 
 =head2 json
 
     $builder->json($data);
+    $builder->json($data, status => 422);
 
-C<as('JSON', $data)>. Data that cannot be encoded dies here.
+C<as('JSON', $data, ...)>, taking a trailing C<status> as L</text> does. Data
+that cannot be encoded dies here.
+
+=head2 problem
+
+    $builder->problem({ type => '/problems/out-of-stock', title => 'Out of stock', status => 409 });
+
+C<as('Problem', ...)>: an RFC 9457 problem details response, its arguments
+those of L<PAGI::Response::Problem>.
 
 =head2 redirect
 
@@ -612,7 +649,7 @@ body last, and keeps what they added.
 
 =head2 A Problem details error
 
-    $res->as('Problem', {
+    $res->problem({
         type   => '/problems/out-of-stock',
         title  => 'Out of stock',
         status => 409,
@@ -684,7 +721,7 @@ calls too:
 
 =over 4
 
-=item * C<text>, C<html>, C<json>, C<file>, C<stream> and C<redirect> call
+=item * C<text>, C<html>, C<json>, C<problem>, C<file>, C<stream> and C<redirect> call
 L</as>. C<empty> builds the builder's own empty response and does not.
 
 =item * C<cookie> and C<header_try> call L</header>; C<delete_cookie> calls

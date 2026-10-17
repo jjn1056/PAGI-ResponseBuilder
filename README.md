@@ -118,6 +118,15 @@ a defined value means ["content\_type"](#content_type); clear the type with
 
 Every value of a field, as an arrayref.
 
+## headers
+
+    my $fields = $builder->headers;    # a PAGI::Headers
+
+A copy of the header fields as they stand, as a [PAGI::Headers](https://metacpan.org/pod/PAGI%3A%3AHeaders): the current
+value's own once a body is chosen, Content-Type included; before that, the
+collected fields, cookies included, with a collected Content-Type last. It is
+a copy: changing it does not change the builder.
+
 ## has\_header
 
 True when the field is present: on the current value if there is one, else
@@ -200,22 +209,34 @@ them.
 ## text
 
     $builder->text($string);
+    $builder->text($string, status => 404);
 
-`as('Text', $string)`. The string must be defined and not a reference; a
-framework that renders other values stringifies them first, in its own
-override.
+`as('Text', $string, ...)`. The string must be defined and not a reference;
+a framework that renders other values stringifies them first, in its own
+override. A trailing `status` belongs to this body, as with ["as"](#as); headers
+and the Content-Type are the builder's, and croak here.
 
 ## html
 
     $builder->html($string);
+    $builder->html($string, status => 404);
 
-`as('HTML', $string)`, with the same rule for the string as ["text"](#text).
+`as('HTML', $string, ...)`, with the same rules as ["text"](#text).
 
 ## json
 
     $builder->json($data);
+    $builder->json($data, status => 422);
 
-`as('JSON', $data)`. Data that cannot be encoded dies here.
+`as('JSON', $data, ...)`, taking a trailing `status` as ["text"](#text) does. Data
+that cannot be encoded dies here.
+
+## problem
+
+    $builder->problem({ type => '/problems/out-of-stock', title => 'Out of stock', status => 409 });
+
+`as('Problem', ...)`: an RFC 9457 problem details response, its arguments
+those of [PAGI::Response::Problem](https://metacpan.org/pod/PAGI%3A%3AResponse%3A%3AProblem).
 
 ## redirect
 
@@ -295,7 +316,7 @@ body last, and keeps what they added.
 
 ## A Problem details error
 
-    $res->as('Problem', {
+    $res->problem({
         type   => '/problems/out-of-stock',
         title  => 'Out of stock',
         status => 409,
@@ -360,7 +381,7 @@ is the intended pattern.
 - Some methods call others through `$self`, so an override sees those
 calls too:
 
-    - `text`, `html`, `json`, `file`, `stream` and `redirect` call
+    - `text`, `html`, `json`, `problem`, `file`, `stream` and `redirect` call
     ["as"](#as). `empty` builds the builder's own empty response and does not.
     - `cookie` and `header_try` call ["header"](#header); `delete_cookie` calls
     ["cookie"](#cookie).
