@@ -4,60 +4,45 @@ PAGI::ResponseBuilder - Collect a response in stages, for frameworks
 
 # SYNOPSIS
 
-A framework extends the builder, and the parts of a request each add to one
-response: hooks collect headers and cookies, the handler chooses the body,
-an error handler may replace it, and the framework sends what is left.
+Used directly, in a PAGI application: collect what you know first, choose
+the body when you know it, then send the response.
 
-    package My::Framework::Response;
+    use Future::AsyncAwait;
+    use PAGI::ResponseBuilder;
+
+    my $app = async sub {
+        my ($scope, $receive, $send) = @_;
+        my $res = PAGI::ResponseBuilder->new;
+
+        $res->header('X-Request-Id' => 'req-42');
+        $res->cookie(session => 'abc123', httponly => 1);
+
+        if    ($scope->{path} eq '/')      { $res->text("Hello\n") }
+        elsif ($scope->{path} eq '/items') { $res->status(201)->json({ id => 7, name => 'ada' }) }
+        elsif ($scope->{path} eq '/old')   { $res->redirect('/', 301) }
+        else                               { $res->problem({ title => 'Not found', status => 404 }) }
+
+        await $res->to_app->($scope, $receive, $send);
+    };
+
+Extended by a framework, which adds its own defaults and shortcuts:
+
+    package My::Response;
     use parent 'PAGI::ResponseBuilder';
 
-    package My::Framework;
-    use Future::AsyncAwait;
-
-    sub app {
-        my ($handler) = @_;
-        return async sub {
-            my ($scope, $receive, $send) = @_;
-            my $res = My::Framework::Response->new;
-
-            # before-hooks and session code collect headers and cookies
-            $res->header('X-Request-Id' => 'req-42');
-            $res->cookie(session => 'abc123', httponly => 1);
-
-            # the handler chooses the body; if it dies, the error handler
-            # replaces whatever it chose, keeping what the hooks collected
-            eval { $handler->($scope, $res); 1 }
-                or $res->status(500)->text("Something went wrong\n");
-
-            # an after-hook can still add to the response
-            $res->header('X-Handled-By' => 'My::Framework');
-
-            # the framework sends it
-            await $res->to_app->($scope, $receive, $send);
-        };
+    # every response this framework makes says so
+    sub new {
+        my ($class) = @_;
+        my $self = $class->SUPER::new;
+        $self->header('X-Powered-By' => 'My::Framework');
+        return $self;
     }
 
-    package main;
-    use Future::AsyncAwait;
-
-    # Each kind of body is one method, and the collecting methods chain.
-    my $app = My::Framework::app(sub {
-        my ($scope, $res) = @_;
-        my $path = $scope->{path};
-
-        return $res->text("Hello\n")                            if $path eq '/';
-        return $res->status(201)->json({ id => 7, name => 'ada' }) if $path eq '/items';
-        return $res->html('<h1>About</h1>')                      if $path eq '/about';
-        return $res->redirect('/about', 301)                     if $path eq '/old';
-        return $res->problem({ title => 'Not found', status => 404 }) if $path eq '/missing';
-        return $res->content_type('text/plain')->stream(async sub {
-            my ($writer) = @_;
-            await $writer->write("one\n");
-            await $writer->write("two\n");
-        }) if $path eq '/feed';
-
-        die "no such page\n";
-    });
+    # a shortcut for the framework's handlers: $res->not_found("no item $id")
+    sub not_found {
+        my ($self, $detail) = @_;
+        return $self->problem({ title => 'Not found', status => 404, detail => $detail });
+    }
 
 # DESCRIPTION
 
