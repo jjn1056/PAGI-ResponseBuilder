@@ -321,17 +321,60 @@ PAGI::ResponseBuilder - Collect a response in stages, for frameworks
 
 =head1 SYNOPSIS
 
+A framework extends the builder, and the parts of a request each add to one
+response: hooks collect headers and cookies, the handler chooses the body,
+an error handler may replace it, and the framework sends what is left.
+
     package My::Framework::Response;
     use parent 'PAGI::ResponseBuilder';
 
-    # in the framework, while handling a request
-    my $res = My::Framework::Response->new;
-    $res->header('X-Request-Id' => $id);          # a before-hook
-    $res->cookie(session => $sid, httponly => 1); # session code
-    $res->status(201)->json($item);               # the handler
-    $res->header('X-Elapsed' => $ms);             # an after-hook
+    package My::Framework;
+    use Future::AsyncAwait;
 
-    await $res->to_app->($scope, $receive, $send);
+    sub app {
+        my ($handler) = @_;
+        return async sub {
+            my ($scope, $receive, $send) = @_;
+            my $res = My::Framework::Response->new;
+
+            # before-hooks and session code collect headers and cookies
+            $res->header('X-Request-Id' => 'req-42');
+            $res->cookie(session => 'abc123', httponly => 1);
+
+            # the handler chooses the body; if it dies, the error handler
+            # replaces whatever it chose, keeping what the hooks collected
+            eval { $handler->($scope, $res); 1 }
+                or $res->status(500)->text("Something went wrong\n");
+
+            # an after-hook can still add to the response
+            $res->header('X-Handled-By' => 'My::Framework');
+
+            # the framework sends it
+            await $res->to_app->($scope, $receive, $send);
+        };
+    }
+
+    package main;
+    use Future::AsyncAwait;
+
+    # Each kind of body is one method, and the collecting methods chain.
+    my $app = My::Framework::app(sub {
+        my ($scope, $res) = @_;
+        my $path = $scope->{path};
+
+        return $res->text("Hello\n")                            if $path eq '/';
+        return $res->status(201)->json({ id => 7, name => 'ada' }) if $path eq '/items';
+        return $res->html('<h1>About</h1>')                      if $path eq '/about';
+        return $res->redirect('/about', 301)                     if $path eq '/old';
+        return $res->problem({ title => 'Not found', status => 404 }) if $path eq '/missing';
+        return $res->content_type('text/plain')->stream(async sub {
+            my ($writer) = @_;
+            await $writer->write("one\n");
+            await $writer->write("two\n");
+        }) if $path eq '/feed';
+
+        die "no such page\n";
+    });
 
 =head1 DESCRIPTION
 
