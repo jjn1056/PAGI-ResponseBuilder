@@ -13,6 +13,6 @@
     fields as a PAGI::Headers; text(), html() and json() take a trailing
     status, as PAGI::Response's did before 0.003000.
   - bytes() for a body of encoded bytes, sent as they are.
-  - The SYNOPSIS is a complete small framework: hooks collect headers and
-    cookies, a handler chooses each kind of body, an error handler replaces
-    it, and the framework sends it; a test runs it as published.
+  - The SYNOPSIS shows the builder used directly in a PAGI application, then
+    a small framework subclass with a default header and a shortcut; a test
+    runs it as published.

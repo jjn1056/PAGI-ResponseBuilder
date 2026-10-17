@@ -27,9 +27,8 @@ my $client = PAGI::Test::Client->new(app => $app);
 
 sub hooks_ran {
     my ($res, $label) = @_;
-    is $res->header('x-request-id'), 'req-42', "$label: the before-hook header is sent";
-    like $res->header('set-cookie'), qr/\Asession=abc123;/, "$label: and the session cookie";
-    is $res->header('x-handled-by'), 'My::Framework', "$label: and the after-hook header";
+    is $res->header('x-request-id'), 'req-42', "$label: the header collected first is sent";
+    like $res->header('set-cookie'), qr/\Asession=abc123;/, "$label: and the cookie";
 }
 
 my $res = $client->get('/');
@@ -41,25 +40,24 @@ is $res->status, 201, '/items is a 201';
 is $res->json, { id => 7, name => 'ada' }, 'with a JSON body';
 hooks_ran($res, '/items');
 
-$res = $client->get('/about');
-is $res->header('content-type'), 'text/html; charset=utf-8', '/about is HTML';
-is $res->content, '<h1>About</h1>';
-
 $res = $client->get('/old');
-is [$res->status, $res->header('location')], [301, '/about'], '/old redirects';
+is [$res->status, $res->header('location')], [301, '/'], '/old redirects';
 hooks_ran($res, '/old');
 
-$res = $client->get('/missing');
-is $res->status, 404, '/missing is a 404';
+$res = $client->get('/nowhere');
+is $res->status, 404, 'anything else is a 404';
 is $res->header('content-type'), 'application/problem+json', 'as problem details';
+hooks_ran($res, '/nowhere');
 
-$res = $client->get('/feed');
-is $res->content, "one\ntwo\n", '/feed streams';
-hooks_ran($res, '/feed');
+# The subclass the second half defines.
+my $mine = My::Response->new;
+isa_ok $mine, 'PAGI::ResponseBuilder';
+$res = PAGI::Test::Client->new(app => $mine->text('hi')->to_app)->get('/');
+is $res->header('x-powered-by'), 'My::Framework', 'its constructor adds the default header';
 
-$res = $client->get('/broken');
-is [$res->status, $res->content], [500, "Something went wrong\n"],
-    'a handler that dies: the error handler replaces the body';
-hooks_ran($res, '/broken');
+$res = PAGI::Test::Client->new(app => My::Response->new->not_found('no item 9')->to_app)->get('/');
+is $res->status, 404, 'not_found is a 404';
+is $res->json->{detail}, 'no item 9', 'with the detail given';
+is $res->header('x-powered-by'), 'My::Framework', 'and the default header';
 
 done_testing;
