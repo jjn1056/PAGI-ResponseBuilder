@@ -262,6 +262,87 @@ builds) each time it is called.
 
 The current value's application.
 
+# COOKBOOK
+
+Each recipe starts from a fresh builder, `my $res = PAGI::ResponseBuilder->new`,
+and leaves in it the response a framework would send with `$res->to_app`.
+Collecting and choosing chain: every method returns the builder.
+
+## Text with a status
+
+    $res->status(201)->text("Created\n");
+
+## JSON, with a header and a cookie collected first
+
+A before-hook and the session code add to the response; the handler picks the
+body last, and keeps what they added.
+
+    $res->header('X-Request-Id' => 'req-42');
+    $res->cookie(session => 'abc123', httponly => 1, samesite => 'Lax');
+    $res->json({ id => 7, name => 'ada' });
+
+## HTML
+
+    $res->html('<p>Hello, <b>world</b></p>');
+
+## A redirect after a form post, keeping a cookie
+
+    $res->cookie(flash => 'saved')->redirect('/items/7', 303);
+
+## No content
+
+    $res->status(204)->empty;
+
+## A Problem details error
+
+    $res->as('Problem', {
+        type   => '/problems/out-of-stock',
+        title  => 'Out of stock',
+        status => 409,
+    });
+
+## A file download
+
+The file is read when the response is sent, not when it is chosen.
+
+    $res->file('reports/2026-10.csv', filename => 'october.csv');
+
+## A streamed body
+
+    $res->content_type('text/csv')->stream(async sub {
+        my ($writer) = @_;
+        await $writer->write("id,name\n");
+        await $writer->write("7,ada\n");
+    });
+
+## Text in a charset other than UTF-8
+
+Text and HTML always send UTF-8. For another charset, encode the text and
+build a plain [PAGI::Response](https://metacpan.org/pod/PAGI%3A%3AResponse) from the bytes; `+` names that class exactly.
+
+    use Encode qw(encode);
+
+    $res->content_type('text/plain; charset=iso-8859-1')
+        ->as('+PAGI::Response', encode('iso-8859-1', "caf\x{e9}"));
+
+## Replacing the body when the handler fails
+
+A body method replaces the body chosen before it, and the headers and cookies
+collected so far are kept, so an error handler can answer in place of a
+response the handler already chose.
+
+    $res->header('X-Request-Id' => 'req-42')->json({ ok => 1 });
+
+    # ... the handler then dies, and the framework's error handler answers:
+    $res->status(500)->text('Internal Server Error');
+
+## A response class of your own
+
+["as"](#as) builds any response class, so a class written for one application is
+chosen the same way as Tools' own.
+
+    $res->as('+My::Response::CSV', [ [qw(id name)], [7, 'ada'] ]);
+
 # SUBCLASSING
 
 Frameworks extend this class. A subclass may rely on the following.
