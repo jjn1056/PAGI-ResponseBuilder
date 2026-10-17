@@ -12,3 +12,4 @@
   - problem() for as('Problem', ...); headers() returns a copy of the header
     fields as a PAGI::Headers; text(), html() and json() take a trailing
     status, as PAGI::Response's did before 0.003000.
+  - bytes() for a body of encoded bytes, sent as they are.

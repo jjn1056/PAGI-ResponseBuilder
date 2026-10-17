@@ -237,6 +237,12 @@ sub json {
     return $self->as('JSON', @arguments);
 }
 
+sub bytes {
+    my ($self, @arguments) = @_;
+    croak 'bytes() takes encoded bytes and an optional status' unless @arguments;
+    return $self->as('+PAGI::Response', @arguments);
+}
+
 sub problem {
     my ($self, @arguments) = @_;
     return $self->as('Problem', @arguments);
@@ -564,6 +570,16 @@ C<as('HTML', $string, ...)>, with the same rules as L</text>.
 C<as('JSON', $data, ...)>, taking a trailing C<status> as L</text> does. Data
 that cannot be encoded dies here.
 
+=head2 bytes
+
+    $builder->bytes($encoded);
+    $builder->content_type('image/png')->bytes($png, status => 201);
+
+C<as('+PAGI::Response', $encoded, ...)>: a body of bytes already encoded,
+sent as they are, with C<application/octet-stream> unless a Content-Type is
+collected. Characters croak; encode them first. It takes a trailing C<status>
+as L</text> does.
+
 =head2 problem
 
     $builder->problem({ type => '/problems/out-of-stock', title => 'Out of stock', status => 409 });
@@ -672,12 +688,12 @@ The file is read when the response is sent, not when it is chosen.
 =head2 Text in a charset other than UTF-8
 
 Text and HTML always send UTF-8. For another charset, encode the text and
-build a plain L<PAGI::Response> from the bytes; C<+> names that class exactly.
+send the bytes.
 
     use Encode qw(encode);
 
     $res->content_type('text/plain; charset=iso-8859-1')
-        ->as('+PAGI::Response', encode('iso-8859-1', "caf\x{e9}"));
+        ->bytes(encode('iso-8859-1', "caf\x{e9}"));
 
 =head2 Replacing the body when the handler fails
 
@@ -721,7 +737,7 @@ calls too:
 
 =over 4
 
-=item * C<text>, C<html>, C<json>, C<problem>, C<file>, C<stream> and C<redirect> call
+=item * C<text>, C<html>, C<json>, C<bytes>, C<problem>, C<file>, C<stream> and C<redirect> call
 L</as>. C<empty> builds the builder's own empty response and does not.
 
 =item * C<cookie> and C<header_try> call L</header>; C<delete_cookie> calls

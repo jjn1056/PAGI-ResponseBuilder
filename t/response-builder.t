@@ -350,10 +350,11 @@ subtest 'documented delegation between methods' => sub {
     my $b = My::Recording::Response->new;
     $b->text('a')->html('b')->json({})->file(__FILE__)->stream(sub { Future->done });
     $b->problem({ title => 'x', status => 400 });
+    $b->bytes('raw');
     $b->redirect('/x')->empty;
     $b->cookie(a => 1)->delete_cookie('b')->header_try('X-T' => 1);
     is \@My::Recording::Response::calls,
-        [qw(as:Text as:HTML as:JSON as:File as:Stream as:Problem as:Redirect
+        [qw(as:Text as:HTML as:JSON as:File as:Stream as:Problem as:+PAGI::Response as:Redirect
             header:Set-Cookie header:Set-Cookie header:X-T)],
         'body methods call as() except empty(); cookies and header_try call header()';
 };
@@ -424,6 +425,20 @@ subtest 'problem is as(Problem)' => sub {
     is $res->header('content-type'), 'application/problem+json';
     is $res->json->{title}, 'Out of stock';
     is $res->header('x-a'), 1, 'collected headers are kept';
+};
+
+subtest 'bytes sends encoded bytes as they are' => sub {
+    my $res = sent(builder()->bytes("\x00\x01\xFF"));
+    is $res->header('content-type'), 'application/octet-stream', 'the plain response type by default';
+    is $res->content, "\x00\x01\xFF";
+
+    $res = sent(builder()->content_type('text/plain; charset=iso-8859-1')
+        ->bytes("caf\xE9", status => 201));
+    is $res->header('content-type'), 'text/plain; charset=iso-8859-1', 'a collected Content-Type is kept';
+    is $res->status, 201, 'and a trailing status taken';
+
+    like dies { builder()->bytes("wide \x{263a}") }, qr/encoded bytes/,
+        'characters are refused: encode them first';
 };
 
 done_testing;

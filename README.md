@@ -231,6 +231,16 @@ and the Content-Type are the builder's, and croak here.
 `as('JSON', $data, ...)`, taking a trailing `status` as ["text"](#text) does. Data
 that cannot be encoded dies here.
 
+## bytes
+
+    $builder->bytes($encoded);
+    $builder->content_type('image/png')->bytes($png, status => 201);
+
+`as('+PAGI::Response', $encoded, ...)`: a body of bytes already encoded,
+sent as they are, with `application/octet-stream` unless a Content-Type is
+collected. Characters croak; encode them first. It takes a trailing `status`
+as ["text"](#text) does.
+
 ## problem
 
     $builder->problem({ type => '/problems/out-of-stock', title => 'Out of stock', status => 409 });
@@ -339,12 +349,12 @@ The file is read when the response is sent, not when it is chosen.
 ## Text in a charset other than UTF-8
 
 Text and HTML always send UTF-8. For another charset, encode the text and
-build a plain [PAGI::Response](https://metacpan.org/pod/PAGI%3A%3AResponse) from the bytes; `+` names that class exactly.
+send the bytes.
 
     use Encode qw(encode);
 
     $res->content_type('text/plain; charset=iso-8859-1')
-        ->as('+PAGI::Response', encode('iso-8859-1', "caf\x{e9}"));
+        ->bytes(encode('iso-8859-1', "caf\x{e9}"));
 
 ## Replacing the body when the handler fails
 
@@ -381,7 +391,7 @@ is the intended pattern.
 - Some methods call others through `$self`, so an override sees those
 calls too:
 
-    - `text`, `html`, `json`, `problem`, `file`, `stream` and `redirect` call
+    - `text`, `html`, `json`, `bytes`, `problem`, `file`, `stream` and `redirect` call
     ["as"](#as). `empty` builds the builder's own empty response and does not.
     - `cookie` and `header_try` call ["header"](#header); `delete_cookie` calls
     ["cookie"](#cookie).
